@@ -1,0 +1,4 @@
+safety>=2.3.5
+pip-audit>=2.5.0
+bandit>=1.7.4
+semgrep>=1.29.0
