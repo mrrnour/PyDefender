@@ -1,5 +1,7 @@
 🛡️ Introducing PyDefender!
+
 Just dropped my latest tool: PyDefender - the all-in-one Python security scanner!
+A comprehensive security scanner for Python packages that combines multiple security tools into a single interface.
 In a nutshell
 One command. Four security tools. Zero headaches.
 Safety + pip-audit + Bandit + Semgrep = Complete protection
@@ -9,5 +11,5 @@ Try it:
 bashCopypython pydefender.py requests  # Scan any package
 python pydefender.py .         # Or your own code
 Code is on GitHub: github.com/yourusername/pydefender
-What security tools are you using? Let me know!
+
 #PythonSecurity #CodingLife #HackersBeware

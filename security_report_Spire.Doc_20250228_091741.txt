@@ -1,0 +1,31 @@
+
+--------------------------------------------------------------------------------
+ENHANCED SECURITY CHECK SUMMARY (2025-02-28 09:17:25)
+--------------------------------------------------------------------------------
+Package/Path: Spire.Doc
+Note: Semgrep is not officially supported on Windows and was automatically excluded.
+--------------------------------------------------------------------------------
+
+Tool                 | Package                        | Vulnerability             | Severity | Description
+----------------------------------------------------------------------------------------------------------
+Safety 3.0.0         | N/A                            | Safety check failed: SSL certificate verification failed. Check your network or proxy settings. | ERROR    | Could not run Safety successfully
+pip-audit 2.8.0      | All packages                   | None                      | SAFE     | No vulnerable packages found
+Bandit 1.8.3         | N/A                            | Bandit check timed out after 180 seconds | ERROR    | Could not run Bandit successfully
+
+
+================================================================================
+SECURITY TOOLS REFERENCE
+================================================================================
+
+Safety:
+Safety checks Python dependencies against known vulnerabilities in the PyUp.io database. It helps identify packages with security issues that need updating.
+
+pip-audit:
+pip-audit leverages the Python Packaging Advisory Database (PyPA) to scan for vulnerabilities in installed packages. It provides more up-to-date vulnerability information than Safety in some cases.
+
+Bandit:
+Bandit is a static code analysis tool designed to find common security issues in Python code. It analyzes your code's AST (Abstract Syntax Tree) to identify issues like hardcoded passwords, SQL injection, and more.
+
+Semgrep:
+Semgrep is a lightweight static analysis tool that uses patterns to find bugs and enforce code standards. Its security rules can detect complex vulnerabilities that other tools might miss.
+
