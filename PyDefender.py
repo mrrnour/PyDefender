@@ -21,6 +21,8 @@ import shutil
 import argparse
 import re
 import platform
+import csv
+import io
 from datetime import datetime
 from collections import defaultdict
 from functools import lru_cache
@@ -227,11 +229,28 @@ def run_bandit(package_path):
         
         if result.stdout:
             try:
-                return json.loads(result.stdout)
-            except json.JSONDecodeError:
-                return {"error": "Could not parse Bandit output"}
+                # Try to find valid JSON in the output
+                # Sometimes tools output other text before/after the JSON
+                stdout = result.stdout
+                
+                # Look for JSON start/end markers
+                json_start = stdout.find('{')
+                json_end = stdout.rfind('}') + 1
+                
+                if json_start >= 0 and json_end > json_start:
+                    potential_json = stdout[json_start:json_end]
+                    try:
+                        return json.loads(potential_json)
+                    except json.JSONDecodeError:
+                        pass  # Fall back to trying the whole output
+                
+                # If that failed, try the entire output
+                return json.loads(stdout)
+            except json.JSONDecodeError as e:
+                return {"error": f"Could not parse Bandit output: {str(e)}"}
         else:
-            return {"error": result.stderr if result.stderr else "No output from Bandit"}
+            error_msg = result.stderr.strip() if result.stderr else "No output from Bandit"
+            return {"error": error_msg}
         
     except subprocess.TimeoutExpired:
         return {"error": "Bandit check timed out after 180 seconds"}
@@ -438,46 +457,46 @@ def parse_semgrep_results(semgrep_results, tool_version):
     
     return issues
 
-def format_issue_as_string(issue):
-    """Format a single issue as a string."""
-    return (
-        f"{issue['tool']:<20} | "
-        f"{issue['package']:<30} | "
-        f"{issue['vulnerability']:<25} | "
-        f"{issue['severity']:<8} | "
-        f"{issue['description']}"
-    )
-
-def format_table(issues, missing_tools=None):
-    """Format the results into a text table."""
-    # Create header
-    header = f"{'Tool':<20} | {'Package':<30} | {'Vulnerability':<25} | {'Severity':<8} | {'Description'}"
-    separator = "-" * len(header)
+def format_issues_as_csv(issues, missing_tools=None):
+    """Format the results into a CSV string."""
+    # Create a string IO object to write the CSV data
+    output = io.StringIO()
+    writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
     
-    rows = []
+    # Write header
+    writer.writerow(["Tool", "Package", "Vulnerability", "Severity", "Description"])
     
     # Add missing tools as error rows
     if missing_tools:
         for tool in missing_tools:
-            rows.append(
-                f"{tool:<20} | "
-                f"{'NOT INSTALLED':<30} | "
-                f"{'TOOL_MISSING':<25} | "
-                f"ERROR   | "
+            writer.writerow([
+                tool,
+                "NOT INSTALLED",
+                "TOOL_MISSING",
+                "ERROR",
                 f"The {tool} tool is not installed. Security checks for this tool were skipped."
-            )
+            ])
     
     # Add regular issues
     if issues:
         for issue in issues:
-            rows.append(format_issue_as_string(issue))
+            writer.writerow([
+                issue["tool"],
+                issue["package"],
+                issue["vulnerability"],
+                issue["severity"],
+                issue["description"]
+            ])
     
     # Handle case when no issues and no missing tools
-    if not rows:
-        rows.append(f"{'N/A':<20} | {'N/A':<30} | {'NONE':<25} | INFO    | No results generated. This is unusual.")
+    if not issues and not missing_tools:
+        writer.writerow(["N/A", "N/A", "NONE", "INFO", "No results generated. This is unusual."])
     
-    # Combine into table
-    return f"{header}\n{separator}\n" + "\n".join(rows)
+    # Get the CSV data as a string
+    csv_data = output.getvalue()
+    output.close()
+    
+    return csv_data
 
 def check_package_security(package_name_or_path, include_tools=None, exclude_tools=None):
     """
@@ -489,7 +508,7 @@ def check_package_security(package_name_or_path, include_tools=None, exclude_too
         exclude_tools (list): List of tools to exclude (default: none)
     
     Returns:
-        str: Formatted table with security findings
+        str: Formatted CSV with security findings
     """
     is_windows = platform.system() == "Windows"
     semgrep_excluded = False
@@ -607,77 +626,45 @@ def check_package_security(package_name_or_path, include_tools=None, exclude_too
         summary_counts[tool_name] = issue_count
         total_issues += issue_count
     
-    # Create summary text
-    summary = f"""
-{'-'*80}
-ENHANCED SECURITY CHECK SUMMARY ({timestamp})
-{'-'*80}
-Package/Path: {package_name_or_path}
-"""
+    # Create summary header for CSV
+    summary_rows = []
+    summary_rows.append(["SUMMARY", "", "", "", ""])
+    summary_rows.append(["Security Check Report", timestamp, "", "", ""])
+    summary_rows.append(["Package/Path", package_name_or_path, "", "", ""])
     
     # Add Windows-specific note about Semgrep only if it was actually excluded
     if semgrep_excluded:
-        summary += f"Note: Semgrep is not officially supported on Windows and was automatically excluded.\n"
+        summary_rows.append(["Note", "Semgrep is not officially supported on Windows and was automatically excluded.", "", "", ""])
     
     if not installed_tools:
-        summary += f"ERROR: No security tools are installed! No checks were performed.\n"
-        summary += f"Please install at least one security tool using the commands shown above.\n"
+        summary_rows.append(["ERROR", "No security tools are installed! No checks were performed.", "", "", ""])
+        summary_rows.append(["", "Please install at least one security tool using the commands shown above.", "", "", ""])
     
-    summary += f"{'-'*80}\n"
+    summary_rows.append(["", "", "", "", ""])  # Empty line separator
     
-    # Generate formatted table
-    table = format_table(all_issues, missing_tools=missing_tools)
+    # Create CSV output
+    output = io.StringIO()
+    writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
     
-    return f"{summary}\n{table}\n", all_issues, missing_tools, path_based_tools_excluded, semgrep_excluded
+    # Write summary rows
+    for row in summary_rows:
+        writer.writerow(row)
+    
+    # Get the CSV table
+    csv_table = format_issues_as_csv(all_issues, missing_tools=missing_tools)
+    
+    # Combine summary with table
+    full_csv = output.getvalue() + csv_table
+    output.close()
+    
+    return full_csv, all_issues, missing_tools, path_based_tools_excluded, semgrep_excluded
 
 def save_report(results_text, issues, package_name_or_path, missing_tools=None, path_based_tools_excluded=None, semgrep_excluded=None):
-    """Save the results to a file."""
-    filename = f"security_report_{os.path.basename(package_name_or_path)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    """Save the results to a CSV file."""
+    filename = f"security_report_{os.path.basename(package_name_or_path)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     
-    with open(filename, 'w') as f:
+    with open(filename, 'w', newline='') as f:
         f.write(results_text)
-        
-        # Add note about package name if path-based tools were specifically excluded
-        if path_based_tools_excluded:
-            f.write("\n\nPACKAGE PATH LIMITATION:\n")
-            f.write("-" * 30 + "\n")
-            path_tools_str = ', '.join(path_based_tools_excluded)
-            f.write(f"'{package_name_or_path}' was detected as a package name, and the script attempted to find its installed location.\n")
-            f.write(f"However, the following tools still failed because the package location could not be found or accessed:\n")
-            for tool in path_based_tools_excluded:
-                f.write(f"- {tool}\n")
-            f.write("\nTo perform a more reliable scan including source code analysis, provide a direct path to the source code.\n")
-            f.write("Example: python security_checker.py /path/to/your/package\n\n")
-        
-        if missing_tools:
-            f.write("\n\nMISSING SECURITY TOOLS:\n")
-            f.write("-" * 30 + "\n")
-            for tool in missing_tools:
-                f.write(f"- {tool}: Not installed. Security checks for this tool were skipped.\n")
-            
-            if len(missing_tools) >= 3:
-                f.write("\nWARNING: Most security checks were skipped because security tools are not installed.\n")
-                f.write("Please install one or more security tools to perform actual security checks.\n")
-                
-        # Add a tools legend at the end of the report
-        f.write("\n\n")
-        f.write("=" * 80 + "\n")
-        f.write("SECURITY TOOLS REFERENCE\n")
-        f.write("=" * 80 + "\n\n")
-        
-        tool_details = {
-            "Safety": "Safety checks Python dependencies against known vulnerabilities in the PyUp.io database. It helps identify packages with security issues that need updating.",
-            
-            "pip-audit": "pip-audit leverages the Python Packaging Advisory Database (PyPA) to scan for vulnerabilities in installed packages. It provides more up-to-date vulnerability information than Safety in some cases.",
-            
-            "Bandit": "Bandit is a static code analysis tool designed to find common security issues in Python code. It analyzes your code's AST (Abstract Syntax Tree) to identify issues like hardcoded passwords, SQL injection, and more.",
-            
-            "Semgrep": "Semgrep is a lightweight static analysis tool that uses patterns to find bugs and enforce code standards. Its security rules can detect complex vulnerabilities that other tools might miss."
-        }
-        
-        for tool, description in tool_details.items():
-            f.write(f"{tool}:\n")
-            f.write(f"{description}\n\n")
     
     return filename
 
